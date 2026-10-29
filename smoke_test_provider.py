@@ -5,6 +5,7 @@ Run this script to verify that your configured provider supports tool calling:
     python smoke_test_provider.py
 """
 
+import json
 import os
 import sys
 from dotenv import load_dotenv
@@ -85,18 +86,55 @@ def main() -> int:
 
         decision = client.generate_decision(messages=messages, tools=tools)
 
-        if decision.is_tool_call:
-            print("\n[✓] SUCCESS: Model returned a validated tool call!")
-            print(f"    - Tool Name: {decision.tool_name}")
-            print(f"    - Arguments: {decision.tool_arguments}")
-            print(f"    - Tokens Used: prompt={decision.prompt_tokens}, completion={decision.completion_tokens}")
-            print("\nYour provider is verified and ready for live ProspectPilot runs.")
-            return 0
-        else:
+        if not decision.is_tool_call:
             print("\n[!] WARNING: Model responded with text instead of a tool call:")
             print(f"    Content: {decision.content}")
             print("    Check if your configured model supports function/tool calling.")
             return 1
+
+        print("\n[✓] STEP 1: Model returned a tool call:")
+        print(f"    - Tool Name: {decision.tool_name}")
+        print(f"    - Tool Call ID: {decision.tool_call_id}")
+        print(f"    - Arguments: {decision.tool_arguments}")
+
+        # Simulate tool execution and feedback
+        print("\n[*] STEP 2: Executing tool and returning observation to model...")
+        tool_call_id = decision.tool_call_id or "call_test_001"
+        observation = '{"id": "comp-001", "name": "TracePulse", "industry": "Developer Tools", "description": "eBPF tracing agent"}'
+
+        messages.append({
+            "role": "assistant",
+            "content": decision.content or None,
+            "tool_calls": [
+                {
+                    "id": tool_call_id,
+                    "type": "function",
+                    "function": {
+                        "name": decision.tool_name,
+                        "arguments": json.dumps(decision.tool_arguments),
+                    },
+                }
+            ],
+        })
+        messages.append({
+            "role": "tool",
+            "tool_call_id": tool_call_id,
+            "name": decision.tool_name,
+            "content": observation,
+        })
+
+        decision2 = client.generate_decision(messages=messages, tools=tools)
+
+        if decision2.is_tool_call:
+            print(f"\n[!] Model made another tool call: {decision2.tool_name}")
+        else:
+            print("\n[✓] STEP 3: Model processed tool observation and returned final answer:")
+            print(f"    Summary: {decision2.content[:200]}...")
+
+        total_tokens = decision.prompt_tokens + decision.completion_tokens + decision2.prompt_tokens + decision2.completion_tokens
+        print(f"\n[✓] FULL ROUNDTRIP SUCCESSFUL (Total tokens used: ~{total_tokens})")
+        print("Your provider supports end-to-end tool calling and observation roundtrips.")
+        return 0
 
     except Exception as exc:
         print(f"\n[✗] ERROR contacting provider: {exc}")

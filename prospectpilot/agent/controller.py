@@ -89,19 +89,21 @@ class AgentController:
                     tools=openai_tools,
                 )
             except Exception as exc:
+                error_msg = f"LLM generation failed: {exc}"
                 trace.record_step(TraceStep(
                     step_index=step_idx,
                     action_type="SYSTEM_EVENT",
-                    error=f"LLM generation failed: {exc}",
+                    error=error_msg,
                 ))
                 run_status = "FAILED"
+                final_summary = error_msg
                 break
 
             model_elapsed_ms = round((time.perf_counter() - model_start) * 1000, 2)
 
             # 3. Handle Decision: Tool Call vs Final Text
             if decision.is_tool_call and decision.tool_name:
-                tool_call_id = f"call_{uuid.uuid4().hex[:6]}"
+                tool_call_id = decision.tool_call_id or f"call_{uuid.uuid4().hex[:6]}"
 
                 # Execute validated tool in sandbox
                 tool_result: ToolResult = self.registry.execute(
@@ -146,7 +148,7 @@ class AgentController:
                 # Append to messages in standard tool calling format
                 messages.append({
                     "role": "assistant",
-                    "content": decision.content or "",
+                    "content": decision.content or None,
                     "tool_calls": [
                         {
                             "id": tool_call_id,

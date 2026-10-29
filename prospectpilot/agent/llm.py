@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 class ModelDecision(BaseModel):
     """Normalized response from any language model provider."""
     is_tool_call: bool
+    tool_call_id: Optional[str] = None
     tool_name: Optional[str] = None
     tool_arguments: Dict[str, Any] = Field(default_factory=dict)
     content: Optional[str] = None
@@ -97,6 +98,7 @@ class OpenAICompatibleClient:
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
+            kwargs["parallel_tool_calls"] = False
 
         response = self._client.chat.completions.create(**kwargs)
         choice = response.choices[0]
@@ -116,6 +118,7 @@ class OpenAICompatibleClient:
 
             return ModelDecision(
                 is_tool_call=True,
+                tool_call_id=call.id,
                 tool_name=fn_name,
                 tool_arguments=fn_args,
                 content=message.content,

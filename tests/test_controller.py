@@ -76,6 +76,92 @@ def test_llm_exception_recovery(real_demo_dataset: CompanyDataset) -> None:
 
     result = controller.run(goal="Find tools")
     assert result.status == "FAILED"
+    assert "LLM generation failed: Upstream LLM network timeout" in result.summary
+
+
+def test_tool_call_id_preservation(real_demo_dataset: CompanyDataset) -> None:
+    """Verifies that the provider-assigned tool_call_id is preserved in conversation messages."""
+    recorded_messages = []
+
+    class InspectingMock(MockLLMClient):
+        def generate_decision(self, messages, tools):
+            recorded_messages.append(list(messages))
+            return super().generate_decision(messages, tools)
+
+    mock = InspectingMock(
+        decisions=[
+            ModelDecision(
+                is_tool_call=True,
+                tool_call_id="call_provider_specific_999",
+                tool_name="search_companies",
+                tool_arguments={"query": "eBPF"},
+            ),
+            ModelDecision(
+                is_tool_call=False,
+                content="Finished research.",
+            ),
+        ]
+    )
+
+    controller = AgentController(
+        llm_client=mock,
+        dataset=real_demo_dataset,
+        max_iterations=3,
+    )
+
+    result = controller.run(goal="Find tools")
+    assert result.status == "SUCCESS"
+
+    # Inspect the messages sent in the second call
+    second_call_messages = recorded_messages[1]
+    assistant_msg = [m for m in second_call_messages if m["role"] == "assistant"][0]
+    tool_msg = [m for m in second_call_messages if m["role"] == "tool"][0]
+
+    assert assistant_msg["tool_calls"][0]["id"] == "call_provider_specific_999"
+    assert tool_msg["tool_call_id"] == "call_provider_specific_999"
+
+
+def test_malformed_tool_call_arguments_recovery(real_demo_dataset: CompanyDataset) -> None:
+    """Verifies that malformed or invalid arguments returned by model are caught by schema
+
+    validation and fed back as tool error observation without crashing the agent.
+    """
+    recorded_messages = []
+
+    class InspectingMock(MockLLMClient):
+        def generate_decision(self, messages, tools):
+            recorded_messages.append(list(messages))
+            return super().generate_decision(messages, tools)
+
+    mock = InspectingMock(
+        decisions=[
+            # Model emits malformed argument structure for get_company_profile (missing company_id)
+            ModelDecision(
+                is_tool_call=True,
+                tool_call_id="call_malformed_1",
+                tool_name="get_company_profile",
+                tool_arguments={"invalid_param": 123},
+            ),
+            # Model receives validation error observation and corrects itself
+            ModelDecision(
+                is_tool_call=False,
+                content="Self-corrected after observing validation error.",
+            ),
+        ]
+    )
+
+    controller = AgentController(
+        llm_client=mock,
+        dataset=real_demo_dataset,
+        max_iterations=3,
+    )
+
+    result = controller.run(goal="Find company")
+    assert result.status == "SUCCESS"
+
+    second_call_messages = recorded_messages[1]
+    tool_msg = [m for m in second_call_messages if m["role"] == "tool"][0]
+    assert "TOOL ERROR: Argument validation failed" in tool_msg["content"]
 
 
 def test_full_agent_workflow(real_demo_dataset: CompanyDataset) -> None:

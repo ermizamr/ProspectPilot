@@ -99,19 +99,27 @@ pytest -v
 
 ## Live Provider Setup (Optional)
 
-ProspectPilot works with any OpenAI-compatible provider. You can verify your live connection before running:
+ProspectPilot supports any OpenAI-compatible provider that supports function/tool calling. You can verify your live connection and complete roundtrip execution before running:
 
 ```bash
-# Verify connection & tool calling
+# Verify connection & tool calling roundtrip
 python smoke_test_provider.py
 ```
 
-### Supported Providers
+### Supported Providers & Models
 Configure your `.env` file (see `.env.example`):
-- **Groq** (Fast & free tier): `export GROQ_API_KEY="gsk_..."`
-- **Google Gemini** (Free tier via OpenAI endpoint): `export GEMINI_API_KEY="AIzaSy..."`
-- **OpenAI** (Low cost `gpt-4o-mini`): `export OPENAI_API_KEY="sk-..."`
-- **Local Ollama** (100% free offline): `export OPENAI_BASE_URL="http://localhost:11434/v1"`
+- **Groq Cloud** (Free developer tier available at console.groq.com):
+  - Environment: `export GROQ_API_KEY="gsk_..."`
+  - Model: `export PROSPECTPILOT_MODEL="llama-3.3-70b-versatile"` *(Note: select models support tools)*
+- **OpenAI** (High reliability, ~$0.0003 per run with `gpt-4o-mini`):
+  - Environment: `export OPENAI_API_KEY="sk-..."`
+  - Model: `export PROSPECTPILOT_MODEL="gpt-4o-mini"`
+- **Google Gemini** (Free tier via AI Studio):
+  - Environment: `export GEMINI_API_KEY="AIzaSy..."`
+  - Model: `export PROSPECTPILOT_MODEL="gemini-1.5-flash"`
+- **Local Ollama** (100% free offline execution):
+  - Environment: `export OPENAI_BASE_URL="http://localhost:11434/v1"`
+  - Model: `export PROSPECTPILOT_MODEL="llama3.1"`
 
 Run the live agent:
 ```bash
