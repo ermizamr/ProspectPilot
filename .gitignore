@@ -29,8 +29,13 @@ ENV/
 
 # Testing & Coverage
 .pytest_cache/
+.mypy_cache/
 .coverage
 htmlcov/
+
+# Local Output
+*.csv
+output/
 
 # Environment files
 .env

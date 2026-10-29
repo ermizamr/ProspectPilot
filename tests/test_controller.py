@@ -205,3 +205,33 @@ def test_full_agent_workflow(real_demo_dataset: CompanyDataset) -> None:
     assert eval_item.qualification_status == QualificationStatus.QUALIFIED
     assert eval_item.score_breakdown.total_score >= 70
     assert "TracePulse" in result.summary
+
+
+def test_keyboard_interrupt_recovery(real_demo_dataset: CompanyDataset) -> None:
+    """Verifies that SIGINT (KeyboardInterrupt) preserves partial progress and doesn't crash."""
+    class InterruptingMock:
+        def __init__(self):
+            self.calls = 0
+
+        def generate_decision(self, messages, tools):
+            self.calls += 1
+            if self.calls == 1:
+                return ModelDecision(
+                    is_tool_call=True,
+                    tool_name="get_company_profile",
+                    tool_arguments={"company_id": "comp-001"},
+                )
+            raise KeyboardInterrupt()
+
+    controller = AgentController(
+        llm_client=InterruptingMock(),
+        dataset=real_demo_dataset,
+        max_iterations=5,
+    )
+
+    result = controller.run(goal="Find tools")
+    assert result.status == "INTERRUPTED_BY_USER"
+    assert "interrupted by user" in result.summary.lower()
+    # Verified that the company examined before interrupt was evaluated and saved!
+    assert len(result.evaluations) == 1
+    assert result.evaluations[0].company_id == "comp-001"
