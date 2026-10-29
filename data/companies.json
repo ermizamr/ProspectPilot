@@ -1,0 +1,170 @@
+[
+  {
+    "id": "comp-001",
+    "name": "TracePulse",
+    "domain": "tracepulse.dev",
+    "industry": "Developer Tools",
+    "description": "Distributed tracing and eBPF-based telemetry agent for microservices and cloud-native Kubernetes clusters.",
+    "is_synthetic_demo_data": true,
+    "product_category": "Observability / APM",
+    "target_audience": "Software Engineers, SREs, Platform Engineers",
+    "employee_count": 42,
+    "funding_stage": "Series A",
+    "tech_stack": ["Go", "Rust", "eBPF", "Kubernetes", "Prometheus", "React"],
+    "pricing_model": "Usage-based per million spans with free developer tier",
+    "signals": {
+      "has_public_github": true,
+      "has_active_blog": true,
+      "blog_focus": "Deep dives on Linux kernel tracing and eBPF network overhead",
+      "recent_changelog": "Released Go SDK v2.4 with zero-code instrumentation",
+      "hiring_roles": ["Staff Backend Engineer (Go/Rust)", "Developer Relations Engineer"]
+    }
+  },
+  {
+    "id": "comp-002",
+    "name": "SchemaCraft",
+    "domain": "schemacraft.io",
+    "industry": "Developer Tools",
+    "description": "Database schema migration safety platform with automated pull-request checks and zero-downtime DDL analysis for PostgreSQL and MySQL.",
+    "is_synthetic_demo_data": true,
+    "product_category": "Database DevOps",
+    "target_audience": "Backend Developers, Database Reliability Engineers",
+    "employee_count": 18,
+    "funding_stage": "Seed",
+    "tech_stack": ["TypeScript", "Python", "PostgreSQL", "Docker", "GitHub Actions"],
+    "pricing_model": "Seat-based SaaS for engineering teams with open-source CLI",
+    "signals": {
+      "has_public_github": true,
+      "has_active_blog": true,
+      "blog_focus": "Postgres locking mechanics and database CI/CD best practices",
+      "recent_changelog": "Added GitHub Action for PR schema drift detection",
+      "hiring_roles": ["Senior Python Developer", "DevRel Advocate"]
+    }
+  },
+  {
+    "id": "comp-003",
+    "name": "APIForge",
+    "domain": "apiforge.tech",
+    "industry": "Developer Tools",
+    "description": "OpenAPI-first contract testing tool that generates mock servers and property-based test suites from API specs.",
+    "is_synthetic_demo_data": true,
+    "product_category": "API Quality & Testing",
+    "target_audience": "API Developers, QA Automation Engineers",
+    "employee_count": 65,
+    "funding_stage": "Series B",
+    "tech_stack": ["Rust", "Python", "Node.js", "OpenAPI", "GraphQL"],
+    "pricing_model": "Tiered SaaS with team workspaces and on-prem enterprise",
+    "signals": {
+      "has_public_github": true,
+      "has_active_blog": true,
+      "blog_focus": "Contract-driven development and schema-first microservices",
+      "recent_changelog": "Support for OpenAPI 3.1 and gRPC reflection",
+      "hiring_roles": ["Solutions Architect", "Fullstack Engineer"]
+    }
+  },
+  {
+    "id": "comp-004",
+    "name": "TalentNest HR",
+    "domain": "talentnesthr.com",
+    "industry": "Human Resources & Payroll",
+    "description": "All-in-one HR onboarding, compliance, and employee benefits portal for mid-market retail and hospitality companies.",
+    "is_synthetic_demo_data": true,
+    "product_category": "HRMS / Payroll",
+    "target_audience": "HR Directors, People Operations, Compliance Managers",
+    "employee_count": 120,
+    "funding_stage": "Series B",
+    "tech_stack": ["Ruby on Rails", "React", "PostgreSQL"],
+    "pricing_model": "Per-employee-per-month subscription",
+    "signals": {
+      "has_public_github": false,
+      "has_active_blog": true,
+      "blog_focus": "Labor law compliance and benefits administration trends",
+      "recent_changelog": "Added 2026 tax withholding forms update",
+      "hiring_roles": ["Customer Success Manager", "HR Compliance Specialist"]
+    }
+  },
+  {
+    "id": "comp-005",
+    "name": "LedgerEase",
+    "domain": "ledgerease.com",
+    "industry": "Accounting & Finance",
+    "description": "Automated invoice matching, accounts payable workflows, and reconciliation software for accounting agencies.",
+    "is_synthetic_demo_data": true,
+    "product_category": "Fintech / Accounting Automation",
+    "target_audience": "Accountants, CFOs, Bookkeepers",
+    "employee_count": 85,
+    "funding_stage": "Series A",
+    "tech_stack": ["C#", ".NET Core", "SQL Server", "Angular"],
+    "pricing_model": "Monthly subscription based on invoice volume",
+    "signals": {
+      "has_public_github": false,
+      "has_active_blog": true,
+      "blog_focus": "Month-end close acceleration and automated tax compliance",
+      "recent_changelog": "Direct integration with QuickBooks Desktop",
+      "hiring_roles": ["Account Executive", "Implementation Consultant"]
+    }
+  },
+  {
+    "id": "comp-006",
+    "name": "FitJourney App",
+    "domain": "fitjourney.app",
+    "industry": "Consumer Health & Wellness",
+    "description": "Mobile fitness tracker with personalized AI workout plans, meal logging, and social workout challenges for consumers.",
+    "is_synthetic_demo_data": true,
+    "product_category": "B2C Mobile Application",
+    "target_audience": "Everyday fitness enthusiasts, gym-goers",
+    "employee_count": 25,
+    "funding_stage": "Seed",
+    "tech_stack": ["Swift", "Kotlin", "Firebase"],
+    "pricing_model": "In-app purchases and $9.99/month consumer subscription",
+    "signals": {
+      "has_public_github": false,
+      "has_active_blog": false,
+      "blog_focus": null,
+      "recent_changelog": "iOS 18 widget support and apple watch sync",
+      "hiring_roles": ["Growth Marketer", "iOS Developer"]
+    }
+  },
+  {
+    "id": "comp-007",
+    "name": "CloudNova",
+    "domain": "cloudnova.internal",
+    "industry": "Cloud Infrastructure",
+    "description": "Stealth stage multi-cloud cost allocation and infrastructure optimization agent.",
+    "is_synthetic_demo_data": true,
+    "product_category": "Cloud FinOps",
+    "target_audience": "Cloud Architects, DevOps leads",
+    "employee_count": null,
+    "funding_stage": null,
+    "tech_stack": ["Python", "Terraform", "AWS"],
+    "pricing_model": null,
+    "signals": {
+      "has_public_github": true,
+      "has_active_blog": false,
+      "blog_focus": null,
+      "recent_changelog": null,
+      "hiring_roles": []
+    }
+  },
+  {
+    "id": "comp-008",
+    "name": "DevSecGate",
+    "domain": "devsecgate.io",
+    "industry": "Developer Tools & Security",
+    "description": "Static application security testing (SAST) and secret scanning CLI directly integrated into developer pre-commit hooks and IDEs.",
+    "is_synthetic_demo_data": true,
+    "product_category": "Application Security / DevSecOps",
+    "target_audience": "Software Developers, Security Engineers",
+    "employee_count": 55,
+    "funding_stage": "Series A",
+    "tech_stack": ["Rust", "Python", "Docker", "VS Code Extension API"],
+    "pricing_model": "Freemium developer CLI with enterprise team policy dashboard",
+    "signals": {
+      "has_public_github": true,
+      "has_active_blog": true,
+      "blog_focus": "Preventing token leaks in git history and secure coding tutorials",
+      "recent_changelog": "Added VS Code language server for real-time CVE alerts",
+      "hiring_roles": ["Security Researcher", "Developer Advocate (Python/Rust)"]
+    }
+  }
+]
