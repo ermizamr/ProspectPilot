@@ -234,3 +234,75 @@ def test_keyboard_interrupt_recovery(mock_github: Any) -> None:
     # Verified that the org examined before interrupt was evaluated and saved!
     assert len(result.evaluations) == 1
     assert result.evaluations[0].company_id == "hashicorp"
+
+
+def test_recovered_evaluations_from_search_when_llm_fails(mock_github: Any) -> None:
+    """Verifies that discovered repositories are preserved and evaluated even if the LLM
+
+    fails (e.g. rate limit / network error) before explicit get_org_profile calls.
+    """
+    class SearchThenFailMock:
+        def __init__(self):
+            self.step = 0
+
+        def generate_decision(self, messages, tools):
+            self.step += 1
+            if self.step == 1:
+                return ModelDecision(
+                    is_tool_call=True,
+                    tool_name="search_github_repos",
+                    tool_arguments={"query": "topic:devops"},
+                )
+            raise RuntimeError("API rate limit exceeded")
+
+    controller = AgentController(
+        llm_client=SearchThenFailMock(),
+        github_client=mock_github,
+        max_iterations=5,
+    )
+
+    result = controller.run(goal="Find devops tools")
+    assert result.status == "FAILED"
+    # Even though LLM failed at step 2, the repo discovered at step 1 is scored and not lost!
+    assert len(result.evaluations) >= 1
+    assert result.evaluations[0].company_id == "hashicorp"
+    assert "Preserved and qualified" in result.summary
+
+
+def test_compact_messages_token_budget_protection() -> None:
+    """Verifies that bulky older observations are compacted to protect TPM/token limits."""
+    import json
+
+    messages = [
+        {"role": "system", "content": "You are ProspectPilot."},
+        {"role": "user", "content": "Find backend tools."},
+        {"role": "assistant", "content": None, "tool_calls": [{"id": "c1", "type": "function", "function": {"name": "search_github_repos", "arguments": "{}"}}]},
+        {
+            "role": "tool",
+            "tool_call_id": "c1",
+            "name": "search_github_repos",
+            "content": json.dumps({
+                "total_count": 50,
+                "repos": [
+                    {"full_name": f"org/repo_{i}", "stars": 100 * i, "language": "Python", "description": "A very long detailed description " * 20}
+                    for i in range(10)
+                ]
+            }),
+        },
+        {"role": "assistant", "content": None, "tool_calls": [{"id": "c2", "type": "function", "function": {"name": "search_github_repos", "arguments": "{}"}}]},
+        {"role": "tool", "tool_call_id": "c2", "name": "search_github_repos", "content": '{"total_count": 5, "repos": []}'},
+    ]
+
+    # Without compaction, total length is huge
+    orig_len = sum(len(str(m.get("content") or "")) for m in messages)
+    assert orig_len > 4000
+
+    # Compact with low threshold
+    compacted = AgentController._compact_messages(messages, max_chars=1000)
+    compact_len = sum(len(str(m.get("content") or "")) for m in compacted)
+
+    assert compact_len < orig_len
+    # Verify older search (c1) was compacted to summary
+    assert "Previous search found 50 repos" in compacted[3]["content"]
+    # Verify latest search (c2) remained untouched
+    assert compacted[5]["content"] == '{"total_count": 5, "repos": []}'

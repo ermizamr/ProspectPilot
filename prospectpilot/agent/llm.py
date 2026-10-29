@@ -100,7 +100,26 @@ class OpenAICompatibleClient:
             kwargs["tool_choice"] = "auto"
             kwargs["parallel_tool_calls"] = False
 
-        response = self._client.chat.completions.create(**kwargs)
+        max_retries = 2
+        for attempt in range(max_retries + 1):
+            try:
+                response = self._client.chat.completions.create(**kwargs)
+                break
+            except Exception as exc:
+                err_str = str(exc)
+                # 413 / Request too large / TPM exceeded: compact message history aggressively and retry
+                if ("413" in err_str or "too large" in err_str.lower() or "tpm" in err_str.lower()) and attempt < max_retries:
+                    import time
+                    time.sleep(1.0)
+                    from prospectpilot.agent.controller import AgentController
+                    kwargs["messages"] = AgentController._compact_messages(kwargs["messages"], max_chars=4000)
+                    continue
+                # 429: Rate limit exceeded: backoff and retry
+                elif "429" in err_str and attempt < max_retries:
+                    import time
+                    time.sleep(2.0 * (attempt + 1))
+                    continue
+                raise
         choice = response.choices[0]
         message = choice.message
 

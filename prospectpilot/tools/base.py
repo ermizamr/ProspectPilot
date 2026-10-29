@@ -23,7 +23,7 @@ class ToolResult(BaseModel):
             return "SUCCESS: No content returned."
         if isinstance(self.data, (dict, list)):
             import json
-            return json.dumps(self.data, indent=2)
+            return json.dumps(self.data, separators=(",", ":"))
         return str(self.data)
 
 

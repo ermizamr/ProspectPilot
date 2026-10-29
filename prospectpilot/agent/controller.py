@@ -129,7 +129,10 @@ class AgentController:
                         self.on_step(step_record)
                     break
 
-                # 3. Request LLM decision with sandboxed execution
+                # 3. Compact conversation history if token length is growing
+                messages = self._compact_messages(messages)
+
+                # 4. Request LLM decision with sandboxed execution
                 model_start = time.perf_counter()
                 try:
                     decision: ModelDecision = self.llm_client.generate_decision(
@@ -264,6 +267,12 @@ class AgentController:
         # Sort by score descending
         evaluations.sort(key=lambda e: e.score_breakdown.total_score, reverse=True)
 
+        if run_status == "FAILED" and evaluations:
+            final_summary = (
+                f"{final_summary}. Preserved and qualified {len(evaluations)} candidate(s) "
+                "from gathered evidence."
+            )
+
         trace.finalize(reason=run_status)
 
         return AgentRunResult(
@@ -359,4 +368,80 @@ class AgentController:
                 is_synthetic_demo_data=False,
             ))
 
+        # Fallback rescue: if no org profiles were explicitly fetched (e.g. run aborted early,
+        # rate-limited, or stopped before get_org_profile), qualify all organizations discovered
+        # via repository search results so gathered evidence is never lost.
+        if not prospects and repos_by_owner:
+            for owner, org_repos in repos_by_owner.items():
+                languages = sorted({r.language for r in org_repos if r.language})
+                total_stars = sum(r.stars for r in org_repos)
+                source_urls = [f"https://github.com/{owner}"] + [r.html_url for r in org_repos]
+                desc = org_repos[0].description if org_repos and org_repos[0].description else None
+
+                prospects.append(GitHubProspect(
+                    org_login=owner,
+                    org_name=owner,
+                    org_url=f"https://github.com/{owner}",
+                    org_blog=None,
+                    org_description=desc,
+                    org_public_repos=len(org_repos),
+                    org_company_field=None,
+                    repos=org_repos,
+                    top_languages=languages,
+                    total_stars=total_stars,
+                    has_recent_releases=owner in github_orgs_with_releases,
+                    retrieved_at=now_iso,
+                    source_urls=source_urls,
+                    is_synthetic_demo_data=False,
+                ))
+
         return prospects
+
+    @staticmethod
+    def _compact_messages(messages: List[Dict[str, Any]], max_chars: int = 14000) -> List[Dict[str, Any]]:
+        """Compact older tool observation messages if conversation history grows too large.
+
+        Preserves system prompt, user prompt, and the most recent 2-3 messages intact,
+        while converting older bulky tool JSON results into concise summaries.
+        """
+        total_len = sum(len(str(m.get("content") or "")) for m in messages)
+        if total_len <= max_chars or len(messages) <= 4:
+            return messages
+
+        compacted = list(messages)
+        # Keep system (0), user (1), and last 2 messages untouched
+        cutoff = max(2, len(compacted) - 2)
+        for i in range(2, cutoff):
+            msg = compacted[i]
+            if msg.get("role") == "tool":
+                content = str(msg.get("content") or "")
+                if len(content) > 250:
+                    try:
+                        data = json.loads(content)
+                        if isinstance(data, dict) and "repos" in data:
+                            repos = data.get("repos", [])
+                            total = data.get("total_count", len(repos))
+                            sample = [
+                                f"{r.get('full_name')} (★{r.get('stars', 0)}, {r.get('language') or 'n/a'})"
+                                for r in repos[:4]
+                            ]
+                            compacted[i] = {
+                                **msg,
+                                "content": f"[Previous search found {total} repos. Key results: {', '.join(sample)}]",
+                            }
+                        elif isinstance(data, dict) and "login" in data:
+                            compacted[i] = {
+                                **msg,
+                                "content": f"[Org profile: {data.get('login')} ({data.get('name')}), blog: {data.get('blog')}, repos: {data.get('public_repos')}]",
+                            }
+                        else:
+                            compacted[i] = {
+                                **msg,
+                                "content": content[:250] + "... [compacted for token budget]",
+                            }
+                    except Exception:
+                        compacted[i] = {
+                            **msg,
+                            "content": content[:250] + "... [compacted for token budget]",
+                        }
+        return compacted
