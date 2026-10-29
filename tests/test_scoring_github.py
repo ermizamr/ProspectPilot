@@ -7,6 +7,7 @@ evidence with proper epistemic disclaimers.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 import pytest
 
@@ -296,31 +297,29 @@ def test_controller_deduplicates_orgs(mock_github) -> None:
     assert result.evaluations[0].company_id == "hashicorp"
 
 
-def test_controller_max_time_budget() -> None:
+def test_controller_max_time_budget(mock_github: Any) -> None:
     """Verifies that the controller enforces wall-clock time limits."""
     from prospectpilot.agent.controller import AgentController
     from prospectpilot.agent.llm import MockLLMClient, ModelDecision
-    from prospectpilot.dataset import CompanyDataset
 
     # Slow mock that takes time
     class SlowMock:
-        def __init__(self):
+        def __init__(self) -> None:
             self._call_count = 0
 
-        def generate_decision(self, messages, tools):
+        def generate_decision(self, messages: Any, tools: Any) -> ModelDecision:
             self._call_count += 1
             import time
             time.sleep(0.01)
             return ModelDecision(
                 is_tool_call=True,
-                tool_name="search_companies",
-                tool_arguments={"query": "tools"},
+                tool_name="search_github_repos",
+                tool_arguments={"query": "topic:devops"},
             )
 
-    dataset = CompanyDataset.load_from_file()
     controller = AgentController(
-        llm_client=SlowMock(),
-        dataset=dataset,
+        llm_client=SlowMock(),  # type: ignore[arg-type]
+        github_client=mock_github,
         max_iterations=100,
         max_tool_calls=100,
         max_time_seconds=0.05,  # Very short time budget

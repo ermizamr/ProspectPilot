@@ -29,8 +29,7 @@ def main() -> int:
 
     if not key and not os.getenv("OPENAI_BASE_URL"):
         print("\n[!] No live LLM provider configured.")
-        print("\nYou can run the entire agent offline using:")
-        print("    python -m prospectpilot.cli --mock")
+        print("\nYou can run the deterministic test suite offline using:")
         print("    pytest\n")
         print("To enable a live LLM, choose any of these practical/free options:")
         print("  1. Groq (FREE tier, very fast):")
@@ -57,17 +56,17 @@ def main() -> int:
             {
                 "type": "function",
                 "function": {
-                    "name": "lookup_company",
-                    "description": "Look up a company profile by ID",
+                    "name": "search_github_repos",
+                    "description": "Search GitHub repositories by query string",
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "company_id": {
+                            "query": {
                                 "type": "string",
-                                "description": "Company ID, e.g. comp-001",
+                                "description": "Search query, e.g. topic:devops",
                             }
                         },
-                        "required": ["company_id"],
+                        "required": ["query"],
                     },
                 },
             }
@@ -76,11 +75,11 @@ def main() -> int:
         messages = [
             {
                 "role": "system",
-                "content": "You are a research agent. When asked about a company, you MUST call lookup_company.",
+                "content": "You are a research agent. When asked about repositories, you MUST call search_github_repos.",
             },
             {
                 "role": "user",
-                "content": "Look up company comp-001 in the dataset.",
+                "content": "Search for repositories with topic:devops.",
             },
         ]
 
@@ -100,7 +99,7 @@ def main() -> int:
         # Simulate tool execution and feedback
         print("\n[*] STEP 2: Executing tool and returning observation to model...")
         tool_call_id = decision.tool_call_id or "call_test_001"
-        observation = '{"id": "comp-001", "name": "TracePulse", "industry": "Developer Tools", "description": "eBPF tracing agent"}'
+        observation = '{"total_count": 1, "repos": [{"full_name": "hashicorp/terraform", "owner_login": "hashicorp", "stars": 42000}]}'
 
         messages.append({
             "role": "assistant",

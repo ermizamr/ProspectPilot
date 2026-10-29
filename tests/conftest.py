@@ -2,83 +2,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 import pytest
 
-from prospectpilot.dataset import CompanyDataset
-from prospectpilot.models import (
-    CompanyProfile,
-    CompanySignals,
-    QualificationCriteria,
-)
-
-
-@pytest.fixture
-def sample_dev_profile() -> CompanyProfile:
-    return CompanyProfile(
-        id="comp-dev-01",
-        name="DevToolCo",
-        domain="devtool.io",
-        industry="Developer Tools",
-        description="High performance distributed tracing for backend engineers.",
-        is_synthetic_demo_data=True,
-        product_category="Observability",
-        target_audience="Software Engineers, SREs",
-        employee_count=45,
-        funding_stage="Series A",
-        tech_stack=["Go", "Rust", "Kubernetes"],
-        signals=CompanySignals(
-            has_public_github=True,
-            has_active_blog=True,
-            blog_focus="Kernel eBPF internals",
-            hiring_roles=["Senior Go Engineer", "DevRel Advocate"]
-        ),
-    )
-
-
-@pytest.fixture
-def sample_consumer_profile() -> CompanyProfile:
-    return CompanyProfile(
-        id="comp-consumer-01",
-        name="ChoreBuddy",
-        domain="chorebuddy.app",
-        industry="Consumer Mobile Apps",
-        description="Gamified household chore tracker for families.",
-        is_synthetic_demo_data=True,
-        product_category="B2C Mobile App",
-        target_audience="Parents and families",
-        employee_count=15,
-        funding_stage="Seed",
-        tech_stack=["Flutter", "Firebase"],
-        signals=CompanySignals(
-            has_public_github=False,
-            has_active_blog=False,
-            hiring_roles=["Marketing Specialist"]
-        ),
-    )
-
-
-@pytest.fixture
-def sample_sparse_profile() -> CompanyProfile:
-    return CompanyProfile(
-        id="comp-sparse-01",
-        name="StealthDev",
-        domain="stealthdev.internal",
-        industry="Developer Tools",
-        description="Next-gen compiler in stealth.",
-        is_synthetic_demo_data=True,
-        product_category="Compilers",
-        target_audience=None,
-        employee_count=None,
-        funding_stage=None,
-        tech_stack=["Rust"],
-        signals=CompanySignals(
-            has_public_github=True,
-            has_active_blog=False,
-            hiring_roles=[]
-        ),
-    )
+from prospectpilot.models import QualificationCriteria
+from prospectpilot.tools.base import ToolRegistry
+from prospectpilot.tools.github_tools import register_github_tools
 
 
 @pytest.fixture
@@ -89,11 +18,6 @@ def default_criteria() -> QualificationCriteria:
         min_team_size=10,
         max_team_size=100,
     )
-
-
-@pytest.fixture
-def real_demo_dataset() -> CompanyDataset:
-    return CompanyDataset.load_from_file()
 
 
 # ==============================================================================
@@ -166,6 +90,51 @@ class MockGitHubClient:
         self.call_log.append(f"search_repositories({kwargs})")
         if self._should_raise:
             raise self._should_raise
+        q = str(kwargs.get("query") or kwargs.get("q") or "")
+        if "rare_nonexistent_keyword" in q:
+            return {"total_count": 0, "items": []}
+        if "database" in q:
+            return {
+                "total_count": 1,
+                "items": [{
+                    "full_name": "schemacraft/schemacraft",
+                    "name": "schemacraft",
+                    "owner": {"login": "schemacraft", "type": "Organization"},
+                    "description": "Database schema migration safety platform",
+                    "html_url": "https://github.com/schemacraft/schemacraft",
+                    "stargazers_count": 3500,
+                    "forks_count": 400,
+                    "language": "TypeScript",
+                    "topics": ["database", "postgresql", "migration"],
+                    "license": {"spdx_id": "Apache-2.0"},
+                    "updated_at": "2026-10-25T10:00:00Z",
+                    "created_at": "2021-01-01T00:00:00Z",
+                    "open_issues_count": 25,
+                    "archived": False,
+                    "fork": False,
+                }],
+            }
+        if "security" in q:
+            return {
+                "total_count": 1,
+                "items": [{
+                    "full_name": "devsecgate/scanner",
+                    "name": "scanner",
+                    "owner": {"login": "devsecgate", "type": "Organization"},
+                    "description": "DevSecOps vulnerability scanner",
+                    "html_url": "https://github.com/devsecgate/scanner",
+                    "stargazers_count": 1200,
+                    "forks_count": 150,
+                    "language": "Go",
+                    "topics": ["security", "scanner", "devops"],
+                    "license": {"spdx_id": "MIT"},
+                    "updated_at": "2026-10-25T10:00:00Z",
+                    "created_at": "2020-01-01T00:00:00Z",
+                    "open_issues_count": 10,
+                    "archived": False,
+                    "fork": False,
+                }],
+            }
         return self._search_results or {"total_count": 0, "items": []}
 
     def get_repository(self, **kwargs: Any) -> Dict[str, Any]:
@@ -178,6 +147,31 @@ class MockGitHubClient:
         self.call_log.append(f"get_organization({kwargs})")
         if self._should_raise:
             raise self._should_raise
+        org = kwargs.get("org", "")
+        if org == "devsecgate":
+            return {
+                "login": "devsecgate",
+                "name": "DevSecGate",
+                "description": "Application security and secret scanning",
+                "html_url": "https://github.com/devsecgate",
+                "blog": "https://devsecgate.io",
+                "company": "DevSecGate Inc",
+                "location": "Boston, MA",
+                "public_repos": 15,
+                "created_at": "2020-01-01T00:00:00Z",
+            }
+        if org == "schemacraft":
+            return {
+                "login": "schemacraft",
+                "name": "SchemaCraft",
+                "description": "Database schema migration safety platform",
+                "html_url": "https://github.com/schemacraft",
+                "blog": "https://schemacraft.io",
+                "company": "SchemaCraft Inc",
+                "location": "San Francisco, CA",
+                "public_repos": 20,
+                "created_at": "2021-01-01T00:00:00Z",
+            }
         return self._org_data or {}
 
     def get_releases(self, **kwargs: Any) -> List[Dict[str, Any]]:
@@ -203,3 +197,10 @@ def mock_github() -> MockGitHubClient:
         },
     ])
     return client
+
+
+@pytest.fixture
+def github_registry(mock_github: MockGitHubClient) -> ToolRegistry:
+    registry = ToolRegistry()
+    register_github_tools(registry, mock_github)  # type: ignore[arg-type]
+    return registry

@@ -1,21 +1,20 @@
 """Tests for the bounded agent controller and execution budget enforcement."""
 
+from typing import Any
 import pytest
 from prospectpilot.agent.controller import AgentController
 from prospectpilot.agent.llm import MockLLMClient, ModelDecision
-from prospectpilot.dataset import CompanyDataset
 from prospectpilot.models import QualificationCriteria, QualificationStatus
 
 
-def test_bounded_loop_max_iterations(real_demo_dataset: CompanyDataset) -> None:
+def test_bounded_loop_max_iterations(mock_github: Any) -> None:
     """Verifies that the controller strictly enforces maximum iterations."""
-    # Endless tool caller mock
     endless_mock = MockLLMClient(
         decisions=[
             ModelDecision(
                 is_tool_call=True,
-                tool_name="search_companies",
-                tool_arguments={"query": "tools"},
+                tool_name="search_github_repos",
+                tool_arguments={"query": "topic:devops"},
             )
             for _ in range(10)
         ]
@@ -23,7 +22,7 @@ def test_bounded_loop_max_iterations(real_demo_dataset: CompanyDataset) -> None:
 
     controller = AgentController(
         llm_client=endless_mock,
-        dataset=real_demo_dataset,
+        github_client=mock_github,
         max_iterations=3,
         max_tool_calls=10,
     )
@@ -34,26 +33,26 @@ def test_bounded_loop_max_iterations(real_demo_dataset: CompanyDataset) -> None:
     assert "maximum iteration budget" in result.summary.lower()
 
 
-def test_bounded_loop_max_tool_calls(real_demo_dataset: CompanyDataset) -> None:
+def test_bounded_loop_max_tool_calls(mock_github: Any) -> None:
     """Verifies that the controller halts when tool call budget is exceeded."""
     loop_mock = MockLLMClient(
         decisions=[
             ModelDecision(
                 is_tool_call=True,
-                tool_name="search_companies",
-                tool_arguments={"query": "test"},
+                tool_name="search_github_repos",
+                tool_arguments={"query": "topic:devops"},
             ),
             ModelDecision(
                 is_tool_call=True,
-                tool_name="search_companies",
-                tool_arguments={"query": "test2"},
+                tool_name="search_github_repos",
+                tool_arguments={"query": "topic:security"},
             ),
         ]
     )
 
     controller = AgentController(
         llm_client=loop_mock,
-        dataset=real_demo_dataset,
+        github_client=mock_github,
         max_iterations=10,
         max_tool_calls=1,
     )
@@ -63,7 +62,7 @@ def test_bounded_loop_max_tool_calls(real_demo_dataset: CompanyDataset) -> None:
     assert result.status == "PARTIAL_BUDGET_EXHAUSTED"
 
 
-def test_llm_exception_recovery(real_demo_dataset: CompanyDataset) -> None:
+def test_llm_exception_recovery(mock_github: Any) -> None:
     """Verifies safe failure handling when the LLM provider throws an exception."""
     class FailingLLM:
         def generate_decision(self, messages, tools):
@@ -71,7 +70,7 @@ def test_llm_exception_recovery(real_demo_dataset: CompanyDataset) -> None:
 
     controller = AgentController(
         llm_client=FailingLLM(),
-        dataset=real_demo_dataset,
+        github_client=mock_github,
     )
 
     result = controller.run(goal="Find tools")
@@ -79,7 +78,7 @@ def test_llm_exception_recovery(real_demo_dataset: CompanyDataset) -> None:
     assert "LLM generation failed: Upstream LLM network timeout" in result.summary
 
 
-def test_tool_call_id_preservation(real_demo_dataset: CompanyDataset) -> None:
+def test_tool_call_id_preservation(mock_github: Any) -> None:
     """Verifies that the provider-assigned tool_call_id is preserved in conversation messages."""
     recorded_messages = []
 
@@ -93,8 +92,8 @@ def test_tool_call_id_preservation(real_demo_dataset: CompanyDataset) -> None:
             ModelDecision(
                 is_tool_call=True,
                 tool_call_id="call_provider_specific_999",
-                tool_name="search_companies",
-                tool_arguments={"query": "eBPF"},
+                tool_name="search_github_repos",
+                tool_arguments={"query": "topic:devops"},
             ),
             ModelDecision(
                 is_tool_call=False,
@@ -105,7 +104,7 @@ def test_tool_call_id_preservation(real_demo_dataset: CompanyDataset) -> None:
 
     controller = AgentController(
         llm_client=mock,
-        dataset=real_demo_dataset,
+        github_client=mock_github,
         max_iterations=3,
     )
 
@@ -121,7 +120,7 @@ def test_tool_call_id_preservation(real_demo_dataset: CompanyDataset) -> None:
     assert tool_msg["tool_call_id"] == "call_provider_specific_999"
 
 
-def test_malformed_tool_call_arguments_recovery(real_demo_dataset: CompanyDataset) -> None:
+def test_malformed_tool_call_arguments_recovery(mock_github: Any) -> None:
     """Verifies that malformed or invalid arguments returned by model are caught by schema
 
     validation and fed back as tool error observation without crashing the agent.
@@ -135,11 +134,11 @@ def test_malformed_tool_call_arguments_recovery(real_demo_dataset: CompanyDatase
 
     mock = InspectingMock(
         decisions=[
-            # Model emits malformed argument structure for get_company_profile (missing company_id)
+            # Model emits malformed argument structure for get_org_profile (missing required owner)
             ModelDecision(
                 is_tool_call=True,
                 tool_call_id="call_malformed_1",
-                tool_name="get_company_profile",
+                tool_name="get_org_profile",
                 tool_arguments={"invalid_param": 123},
             ),
             # Model receives validation error observation and corrects itself
@@ -152,7 +151,7 @@ def test_malformed_tool_call_arguments_recovery(real_demo_dataset: CompanyDatase
 
     controller = AgentController(
         llm_client=mock,
-        dataset=real_demo_dataset,
+        github_client=mock_github,
         max_iterations=3,
     )
 
@@ -164,30 +163,30 @@ def test_malformed_tool_call_arguments_recovery(real_demo_dataset: CompanyDatase
     assert "TOOL ERROR: Argument validation failed" in tool_msg["content"]
 
 
-def test_full_agent_workflow(real_demo_dataset: CompanyDataset) -> None:
-    """Verifies complete end-to-end workflow: search -> inspect profile -> finish."""
+def test_full_agent_workflow(mock_github: Any) -> None:
+    """Verifies complete end-to-end workflow: search -> inspect org -> finish."""
     mock = MockLLMClient(
         decisions=[
             ModelDecision(
                 is_tool_call=True,
-                tool_name="search_companies",
-                tool_arguments={"query": "eBPF"},
+                tool_name="search_github_repos",
+                tool_arguments={"query": "topic:devops"},
             ),
             ModelDecision(
                 is_tool_call=True,
-                tool_name="get_company_profile",
-                tool_arguments={"company_id": "comp-001"},
+                tool_name="get_org_profile",
+                tool_arguments={"org": "hashicorp"},
             ),
             ModelDecision(
                 is_tool_call=False,
-                content="TracePulse is an ideal target building eBPF telemetry with 42 employees and active tech blog.",
+                content="HashiCorp is an ideal target building Terraform infrastructure tools with 42,000 stars.",
             ),
         ]
     )
 
     controller = AgentController(
         llm_client=mock,
-        dataset=real_demo_dataset,
+        github_client=mock_github,
         max_iterations=5,
     )
 
@@ -200,14 +199,14 @@ def test_full_agent_workflow(real_demo_dataset: CompanyDataset) -> None:
     assert result.total_tool_calls == 2
     assert len(result.evaluations) == 1
     eval_item = result.evaluations[0]
-    assert eval_item.company_id == "comp-001"
-    assert eval_item.company_name == "TracePulse"
+    assert eval_item.company_id == "hashicorp"
+    assert eval_item.company_name == "HashiCorp"
     assert eval_item.qualification_status == QualificationStatus.QUALIFIED
     assert eval_item.score_breakdown.total_score >= 70
-    assert "TracePulse" in result.summary
+    assert "HashiCorp" in result.summary
 
 
-def test_keyboard_interrupt_recovery(real_demo_dataset: CompanyDataset) -> None:
+def test_keyboard_interrupt_recovery(mock_github: Any) -> None:
     """Verifies that SIGINT (KeyboardInterrupt) preserves partial progress and doesn't crash."""
     class InterruptingMock:
         def __init__(self):
@@ -216,22 +215,22 @@ def test_keyboard_interrupt_recovery(real_demo_dataset: CompanyDataset) -> None:
         def generate_decision(self, messages, tools):
             self.calls += 1
             if self.calls == 1:
-                return ModelDecision(
-                    is_tool_call=True,
-                    tool_name="get_company_profile",
-                    tool_arguments={"company_id": "comp-001"},
-                )
+                    return ModelDecision(
+                        is_tool_call=True,
+                        tool_name="get_org_profile",
+                        tool_arguments={"org": "hashicorp"},
+                    )
             raise KeyboardInterrupt()
 
     controller = AgentController(
         llm_client=InterruptingMock(),
-        dataset=real_demo_dataset,
+        github_client=mock_github,
         max_iterations=5,
     )
 
     result = controller.run(goal="Find tools")
     assert result.status == "INTERRUPTED_BY_USER"
     assert "interrupted by user" in result.summary.lower()
-    # Verified that the company examined before interrupt was evaluated and saved!
+    # Verified that the org examined before interrupt was evaluated and saved!
     assert len(result.evaluations) == 1
-    assert result.evaluations[0].company_id == "comp-001"
+    assert result.evaluations[0].company_id == "hashicorp"

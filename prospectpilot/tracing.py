@@ -15,6 +15,7 @@ class TraceStep(BaseModel):
     action_type: str  # "MODEL_DECISION", "TOOL_EXECUTION", "SYSTEM_EVENT"
     decision_summary: Optional[str] = None
     tool_name: Optional[str] = None
+    tool_call_id: Optional[str] = None
     tool_arguments: Dict[str, Any] = Field(default_factory=dict)
     tool_success: Optional[bool] = None
     tool_observation_preview: Optional[str] = None

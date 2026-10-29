@@ -17,8 +17,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from prospectpilot.agent.controller import AgentController
-from prospectpilot.agent.llm import LLMClient, MockLLMClient, OpenAICompatibleClient
-from prospectpilot.dataset import CompanyDataset
+from prospectpilot.agent.llm import LLMClient, OpenAICompatibleClient
 from prospectpilot.models import (
     AgentRunResult,
     QualificationCriteria,
@@ -71,15 +70,6 @@ def is_live_llm_configured() -> bool:
     )
 
 
-def create_demo_adaptive_mock() -> MockLLMClient:
-    """Creates a deterministic adaptive mock that demonstrates genuine decision-making
-
-    from previous observations without requiring network or API keys.
-    """
-    from prospectpilot.agent.adaptive_mock import create_adaptive_decision_handler
-    return MockLLMClient(dynamic_handler=create_adaptive_decision_handler())
-
-
 def _export_csv(result: AgentRunResult, path: Path) -> None:
     """Export evaluation results to CSV with evidence and source URLs."""
     with open(path, "w", newline="", encoding="utf-8") as f:
@@ -88,7 +78,7 @@ def _export_csv(result: AgentRunResult, path: Path) -> None:
             "company_id", "company_name", "domain", "qualification_status",
             "total_score", "dev_alignment_score", "scale_score", "signal_score",
             "evidence_summary", "missing_information", "recommended_action",
-            "source_urls", "is_synthetic",
+            "source_urls",
         ])
         for ev in result.evaluations:
             evidence_summary = "; ".join(
@@ -111,7 +101,6 @@ def _export_csv(result: AgentRunResult, path: Path) -> None:
                 missing,
                 ev.recommended_action,
                 source_urls,
-                ev.is_synthetic_demo_data,
             ])
 
 
@@ -146,37 +135,35 @@ def prompt_interactive_preset() -> Tuple[str, str]:
 def run_cli(
     goal: str,
     target_focus: str = "Developer Tools",
-    mock_mode: bool = False,
     max_iterations: int = 10,
     max_tool_calls: int = 20,
     max_time_seconds: float = 300.0,
     as_json: bool = False,
     export_path: Optional[str] = None,
+    llm_client: Optional[LLMClient] = None,
+    github_client: Optional[Any] = None,
 ) -> int:
     """Executes the agent run and prints live traces and structured summaries."""
 
     criteria = QualificationCriteria(target_focus=target_focus)
 
-    if not mock_mode:
+    if llm_client is None:
         if not is_live_llm_configured():
             console.print("[bold red]Configuration Error:[/bold red] No live LLM provider API key detected.\n")
-            console.print("ProspectPilot conducts live research using the GitHub REST API and an LLM.")
+            console.print("ProspectPilot conducts research using the GitHub REST API and an LLM.")
             console.print("Set an API key in your environment or .env file (see .env.example):\n")
             console.print("  • export GROQ_API_KEY=\"gsk_...\"      (Free fast tier: console.groq.com)")
             console.print("  • export OPENAI_API_KEY=\"sk-...\"     (OpenAI gpt-4o-mini)")
             console.print("  • export GEMINI_API_KEY=\"AIzaSy...\"  (Google AI Studio)")
             console.print("  • export OPENAI_BASE_URL=\"http://localhost:11434/v1\" (Local Ollama)")
-            console.print("\n[dim]To run offline unit tests with synthetic fixtures, pass: prospectpilot --mock[/dim]")
             return 1
 
     if not as_json:
-        mode_label = "Offline Mock (Synthetic Fixtures)" if mock_mode else "Live GitHub REST API Research"
-        mode_color = "yellow" if mock_mode else "green"
         console.print(
             Panel.fit(
                 "[bold cyan]ProspectPilot[/bold cyan] — Agentic Developer Outreach Research\n"
                 f"[dim]Goal:[/dim] [white]{goal}[/white]\n"
-                f"[dim]Mode:[/dim] [{mode_color}]{mode_label}[/{mode_color}] | "
+                f"[dim]Mode:[/dim] [green]Live GitHub REST API Research[/green] | "
                 f"[dim]Focus:[/dim] {criteria.target_focus}",
                 border_style="cyan",
             )
@@ -184,8 +171,8 @@ def run_cli(
 
     # Instantiate LLM client
     llm: LLMClient
-    if mock_mode:
-        llm = create_demo_adaptive_mock()
+    if llm_client is not None:
+        llm = llm_client
     else:
         try:
             llm = OpenAICompatibleClient()
@@ -193,44 +180,28 @@ def run_cli(
             console.print(f"[bold red]Configuration Error:[/bold red] {err}")
             return 1
 
-    controller: AgentController
+    from prospectpilot.github_client import GitHubClient
 
-    if mock_mode:
-        # Synthetic mode with demo dataset (for tests only)
-        dataset = CompanyDataset.load_from_file()
-        controller = AgentController(
-            llm_client=llm,
-            dataset=dataset,
-            max_iterations=max_iterations,
-            max_tool_calls=max_tool_calls,
-            max_time_seconds=max_time_seconds,
-            on_step=_make_trace_printer(as_json),
-        )
-    else:
-        # Live mode with GitHub tools
-        from prospectpilot.github_client import GitHubClient
-        from prospectpilot.tools.github_tools import register_github_tools
+    gh_client = github_client or GitHubClient()
 
+    if not as_json and github_client is None:
         github_token = os.getenv("GITHUB_TOKEN")
-        if not as_json:
-            if github_token:
-                console.print("[green]✓[/green] GITHUB_TOKEN active (5,000 req/hr authenticated rate limit)")
-            else:
-                console.print(
-                    "[yellow]⚠[/yellow] No GITHUB_TOKEN set — running unauthenticated (60 req/hr limit). "
-                    "Set GITHUB_TOKEN for 5,000 req/hr."
-                )
+        if github_token:
+            console.print("[green]✓[/green] GITHUB_TOKEN active (5,000 req/hr authenticated rate limit)")
+        else:
+            console.print(
+                "[yellow]⚠[/yellow] No GITHUB_TOKEN set — running unauthenticated (60 req/hr limit). "
+                "Set GITHUB_TOKEN for 5,000 req/hr."
+            )
 
-        github_client = GitHubClient()
-        controller = AgentController(
-            llm_client=llm,
-            max_iterations=max_iterations,
-            max_tool_calls=max_tool_calls,
-            max_time_seconds=max_time_seconds,
-            on_step=_make_trace_printer(as_json),
-            github_tools_registered=True,
-        )
-        register_github_tools(controller.registry, github_client)
+    controller = AgentController(
+        llm_client=llm,
+        github_client=gh_client,
+        max_iterations=max_iterations,
+        max_tool_calls=max_tool_calls,
+        max_time_seconds=max_time_seconds,
+        on_step=_make_trace_printer(as_json),
+    )
 
     if not as_json:
         console.print("[bold]Executing Bounded Research Loop...[/bold]\n")
@@ -269,8 +240,6 @@ def _make_trace_printer(as_json: bool) -> Optional[Any]:
         "get_org_profile": "🏢 [bold blue]Inspect Org[/bold blue]",
         "get_repo_details": "📦 [bold magenta]Inspect Repo[/bold magenta]",
         "get_recent_releases": "🏷️  [bold yellow]Check Releases[/bold yellow]",
-        "search_companies": "🔎 [bold cyan]Search Companies[/bold cyan]",
-        "get_company_profile": "🏢 [bold blue]Inspect Profile[/bold blue]",
     }
 
     def print_trace_step(step: Any) -> None:
@@ -307,7 +276,7 @@ def _print_results(result: AgentRunResult, elapsed: float) -> None:
         f"Iterations: {result.total_iterations} | "
         f"Tool Calls: {result.total_tool_calls} | "
         f"Tokens: {result.total_tokens} | "
-        f"Data Source: {'Synthetic Demo' if result.is_synthetic_demo_run else 'Live GitHub REST API'}\n"
+        f"Data Source: GitHub REST API\n"
     )
 
     if result.evaluations:
@@ -323,29 +292,18 @@ def _print_results(result: AgentRunResult, elapsed: float) -> None:
             status_text = {
                 QualificationStatus.QUALIFIED: "[bold green]✔ QUALIFIED[/bold green]",
                 QualificationStatus.DISQUALIFIED: "[bold red]✘ DISQUALIFIED[/bold red]",
-                QualificationStatus.INSUFFICIENT_DATA: "[bold yellow]⚠ UNCERTAIN[/bold yellow]",
-            }[ev.qualification_status]
+                QualificationStatus.INSUFFICIENT_DATA: "[bold yellow]⚠ INSUFFICIENT DATA[/bold yellow]",
+            }.get(ev.qualification_status, str(ev.qualification_status))
 
-            score_text = (
-                f"{ev.score_breakdown.total_score}/100\n"
-                f"[dim](D:{ev.score_breakdown.developer_alignment_score} "
-                f"S:{ev.score_breakdown.scale_and_stage_score} "
-                f"E:{ev.score_breakdown.engagement_signals_score})[/dim]"
-            )
+            score = ev.score_breakdown.total_score
+            score_color = "green" if score >= 70 else ("red" if score < 50 else "yellow")
+            score_text = f"[{score_color}][bold]{score}[/bold]/100[/{score_color}]"
 
-            evidence_bullets = "\n".join(
-                f"• {e.field_name}: {e.observed_value}" for e in ev.evidence[:3]
-            )
-            missing_bullets = (
-                "\n".join(f"• {m}" for m in ev.missing_information[:3])
-                if ev.missing_information
-                else "None"
-            )
-
-            data_tag = "" if not ev.is_synthetic_demo_data else "\n[dim](synthetic)[/dim]"
+            evidence_bullets = "\n".join(f"• {e.field_name}: {e.relevance}" for e in ev.evidence[:3])
+            missing_bullets = "\n".join(f"• {m}" for m in ev.missing_information[:3])
 
             table.add_row(
-                f"{ev.company_name}\n[dim]{ev.domain}[/dim]{data_tag}",
+                f"[bold]{ev.company_name}[/bold]\n[dim]{ev.domain}[/dim]",
                 status_text,
                 score_text,
                 evidence_bullets,
@@ -377,11 +335,10 @@ def main() -> None:
         prog="prospectpilot",
         description="ProspectPilot: Agentic Developer-Prospect Research System",
         epilog="Examples:\n"
-               "  prospectpilot                      # Instant run with smart defaults\n"
-               "  prospectpilot -p devops            # Run DevOps & Cloud-Native preset\n"
+               "  prospectpilot                         # Instant run with smart defaults\n"
+               "  prospectpilot -p devops               # Run DevOps & Cloud-Native preset\n"
                "  prospectpilot -p security -o out.csv  # Security research + export CSV\n"
-               "  prospectpilot -i                   # Interactive vertical picker\n"
-               "  prospectpilot --mock               # Force offline demo mode\n",
+               "  prospectpilot -i                      # Interactive vertical picker\n",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
@@ -407,11 +364,6 @@ def main() -> None:
         type=str,
         default=None,
         help="Target vertical or keyword criteria (default: 'Developer Tools').",
-    )
-    parser.add_argument(
-        "--mock", "-m",
-        action="store_true",
-        help="Run offline using synthetic fixtures (deterministic testing only).",
     )
     parser.add_argument(
         "--output", "-o",
@@ -479,14 +431,13 @@ def main() -> None:
     else:
         default_preset = PRESETS["backend"]
         goal = args.goal or default_preset["goal"]
-        focus = args.focus or args.focus or default_preset["focus"]
+        focus = args.focus or default_preset["focus"]
 
     export_path = args.output or args.csv
 
     code = run_cli(
         goal=goal,
         target_focus=focus,
-        mock_mode=args.mock,
         max_iterations=args.max_iterations,
         max_tool_calls=args.max_tool_calls,
         max_time_seconds=args.max_time,

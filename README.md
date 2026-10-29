@@ -3,7 +3,7 @@
 [![CI](https://github.com/ermizamr/ProspectPilot/actions/workflows/ci.yml/badge.svg)](https://github.com/ermizamr/ProspectPilot/actions/workflows/ci.yml)
 ![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)
 ![Type Checked](https://img.shields.io/badge/type%20checked-mypy-blue.svg)
-![Tests](https://img.shields.io/badge/tests-79%20passed-brightgreen.svg)
+![Tests](https://img.shields.io/badge/tests-73%20passed-brightgreen.svg)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 > **Evidence-Backed Developer-Prospecting Research Agent**  
@@ -124,7 +124,7 @@ User Goal & Criteria
 ## Testing & Quality
 
 ```bash
-# Run 79 deterministic offline tests (0.33s, 0 network calls)
+# Run 73 deterministic offline tests (0.30s, 0 network calls)
 pytest
 
 # Static type check (15 source files, 0 errors)
@@ -132,9 +132,6 @@ mypy prospectpilot
 
 # Opt-in live GitHub API smoke test
 pytest -m live
-
-# Offline unit-test debugging with synthetic fixtures
-prospectpilot --mock -p security
 ```
 
 ---

@@ -1,8 +1,8 @@
 """Bounded ReAct agent controller with budget enforcement and deterministic qualification.
 
-Supports both synthetic (mock) and live (GitHub) research modes.
-Deduplicates examined organizations, enforces iteration/tool-call/time budgets,
-and applies deterministic Python scoring to all examined prospects.
+Orchestrates research using GitHub tools, deduplicates examined organizations,
+enforces iteration/tool-call/time budgets, and applies deterministic Python
+scoring to all examined prospects.
 """
 
 from __future__ import annotations
@@ -13,30 +13,22 @@ import uuid
 from typing import Any, Callable, Dict, List, Optional
 
 from prospectpilot.agent.llm import LLMClient, ModelDecision
-from prospectpilot.agent.prompts import SYSTEM_PROMPT_MOCK, SYSTEM_PROMPT_LIVE, build_user_prompt
-from prospectpilot.dataset import CompanyDataset
+from prospectpilot.agent.prompts import SYSTEM_PROMPT, build_user_prompt
 from prospectpilot.models import (
     AgentRunResult,
     CompanyEvaluation,
-    CompanyProfile,
     GitHubOrgSummary,
     GitHubProspect,
     GitHubRepoSummary,
     QualificationCriteria,
-    evaluate_company_deterministic,
     evaluate_github_prospect_deterministic,
 )
 from prospectpilot.tools.base import ToolRegistry, ToolResult
-from prospectpilot.tools.company_tools import register_company_tools
 from prospectpilot.tracing import ExecutionTrace, TraceStep
 
 
 class AgentController:
     """Orchestrates the bounded agent loop with strict Python-enforced budgets.
-
-    Supports two modes:
-    - Synthetic (mock): Uses local company dataset + synthetic tools
-    - Live (GitHub): Uses real GitHub API tools for research
 
     Budget enforcement:
     - max_iterations: Maximum loop iterations
@@ -47,27 +39,30 @@ class AgentController:
     def __init__(
         self,
         llm_client: LLMClient,
-        dataset: Optional[CompanyDataset] = None,
+        registry: Optional[ToolRegistry] = None,
+        github_client: Optional[Any] = None,
         max_iterations: int = 6,
         max_tool_calls: int = 10,
         max_time_seconds: float = 300.0,
         on_step: Optional[Callable[..., Any]] = None,
         github_tools_registered: bool = False,
+        **kwargs: Any,
     ) -> None:
         self.llm_client = llm_client
         self.max_iterations = max_iterations
         self.max_tool_calls = max_tool_calls
         self.max_time_seconds = max_time_seconds
         self.on_step = on_step
-        self._github_mode = github_tools_registered
 
-        # Setup tool registry
-        self.registry = ToolRegistry()
-        self.dataset: Optional[CompanyDataset] = None
-        if not github_tools_registered:
-            # Synthetic mode: register company dataset tools
-            self.dataset = dataset or CompanyDataset.load_from_file()
-            register_company_tools(self.registry, self.dataset)
+        if registry is not None:
+            self.registry = registry
+        else:
+            from prospectpilot.github_client import GitHubClient
+            from prospectpilot.tools.github_tools import register_github_tools
+
+            self.registry = ToolRegistry()
+            client = github_client or GitHubClient()
+            register_github_tools(self.registry, client)
 
     def register_tools_into(self, registry: ToolRegistry) -> None:
         """Allow external callers to register additional tools."""
@@ -84,19 +79,14 @@ class AgentController:
         trace = ExecutionTrace(run_id=run_id, goal=goal)
         run_start_time = time.perf_counter()
 
-        # Tracking: synthetic profiles
-        examined_profiles: Dict[str, CompanyProfile] = {}
         # Tracking: GitHub repos and orgs (deduplication by key)
         examined_github_repos: Dict[str, GitHubRepoSummary] = {}
         examined_github_orgs: Dict[str, GitHubOrgSummary] = {}
         github_orgs_with_releases: set[str] = set()
 
-        # Select system prompt based on mode
-        system_prompt = SYSTEM_PROMPT_LIVE if self._github_mode else SYSTEM_PROMPT_MOCK
-
         # Conversation history for the LLM
         messages: List[Dict[str, Any]] = [
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": build_user_prompt(goal, criteria)},
         ]
 
@@ -110,34 +100,36 @@ class AgentController:
                 step_idx += 1
                 trace.total_iterations = step_idx
 
-                # 1. Enforce Tool Call Budget
-                if trace.total_tool_calls >= self.max_tool_calls:
-                    run_status = "PARTIAL_BUDGET_EXHAUSTED"
-                    step_record = TraceStep(
-                        step_index=step_idx,
-                        action_type="SYSTEM_EVENT",
-                        decision_summary="Max tool calls budget exceeded; forcing termination.",
-                    )
-                    trace.record_step(step_record)
-                    if self.on_step:
-                        self.on_step(step_record)
-                    break
-
-                # 2. Enforce Time Budget
+                # 1. Budget Guard: Execution Time limit check
                 elapsed = time.perf_counter() - run_start_time
                 if elapsed >= self.max_time_seconds:
                     run_status = "PARTIAL_BUDGET_EXHAUSTED"
+                    final_summary = f"Terminated due to time budget limit ({self.max_time_seconds:.1f}s exceeded)."
                     step_record = TraceStep(
                         step_index=step_idx,
                         action_type="SYSTEM_EVENT",
-                        decision_summary=f"Time budget exceeded ({elapsed:.1f}s >= {self.max_time_seconds:.0f}s).",
+                        decision_summary=f"Time budget of {self.max_time_seconds}s exceeded. Finalizing partial results.",
                     )
                     trace.record_step(step_record)
                     if self.on_step:
                         self.on_step(step_record)
                     break
 
-                # 3. Invoke Model
+                # 2. Budget Guard: Tool Call count limit check
+                if trace.total_tool_calls >= self.max_tool_calls:
+                    run_status = "PARTIAL_BUDGET_EXHAUSTED"
+                    final_summary = f"Terminated due to maximum tool call budget ({self.max_tool_calls} calls limit reached)."
+                    step_record = TraceStep(
+                        step_index=step_idx,
+                        action_type="SYSTEM_EVENT",
+                        decision_summary=f"Tool call budget of {self.max_tool_calls} reached. Halting tool loop.",
+                    )
+                    trace.record_step(step_record)
+                    if self.on_step:
+                        self.on_step(step_record)
+                    break
+
+                # 3. Request LLM decision with sandboxed execution
                 model_start = time.perf_counter()
                 try:
                     decision: ModelDecision = self.llm_client.generate_decision(
@@ -145,55 +137,50 @@ class AgentController:
                         tools=openai_tools,
                     )
                 except Exception as exc:
-                    error_msg = f"LLM generation failed: {exc}"
+                    run_status = "FAILED"
+                    final_summary = f"LLM generation failed: {exc}"
                     step_record = TraceStep(
                         step_index=step_idx,
                         action_type="SYSTEM_EVENT",
-                        error=error_msg,
+                        decision_summary="LLM failed to return a valid response.",
+                        error=str(exc),
                     )
                     trace.record_step(step_record)
                     if self.on_step:
                         self.on_step(step_record)
-                    run_status = "FAILED"
-                    final_summary = error_msg
                     break
 
-                model_elapsed_ms = round((time.perf_counter() - model_start) * 1000, 2)
+                model_elapsed_ms = (time.perf_counter() - model_start) * 1000
 
-                # 4. Handle Decision: Tool Call vs Final Text
+                # 4. Process Decision: Tool Call vs Final Text
                 if decision.is_tool_call and decision.tool_name:
-                    tool_call_id = decision.tool_call_id or f"call_{uuid.uuid4().hex[:6]}"
+                    tool_call_id = decision.tool_call_id or f"call_{uuid.uuid4().hex[:12]}"
 
-                    # Execute validated tool in sandbox
+                    # Execute the requested tool via registry
                     tool_result: ToolResult = self.registry.execute(
-                        name=decision.tool_name,
-                        raw_args=decision.tool_arguments,
+                        decision.tool_name,
+                        decision.tool_arguments,
                     )
 
-                    # Track examined entities for post-loop scoring
+                    # Deduplicate and track entities for post-loop qualification
                     self._track_tool_result(
                         tool_name=decision.tool_name,
                         tool_result=tool_result,
-                        examined_profiles=examined_profiles,
                         examined_github_repos=examined_github_repos,
                         examined_github_orgs=examined_github_orgs,
                         github_orgs_with_releases=github_orgs_with_releases,
                     )
 
-                    # Record in trace
-                    obs_preview = tool_result.to_observation_string()
-                    if len(obs_preview) > 300:
-                        obs_preview = obs_preview[:300] + "... [truncated in trace]"
-
+                    # Record step in trace
                     step_record = TraceStep(
                         step_index=step_idx,
                         duration_ms=model_elapsed_ms + tool_result.execution_time_ms,
                         action_type="TOOL_EXECUTION",
-                        decision_summary=f"Called '{decision.tool_name}'",
                         tool_name=decision.tool_name,
+                        tool_call_id=tool_call_id,
                         tool_arguments=decision.tool_arguments,
                         tool_success=tool_result.success,
-                        tool_observation_preview=obs_preview,
+                        tool_observation_preview=tool_result.to_observation_string()[:200],
                         error=tool_result.error,
                         prompt_tokens=decision.prompt_tokens,
                         completion_tokens=decision.completion_tokens,
@@ -261,14 +248,6 @@ class AgentController:
         # 5. Perform Deterministic Python Qualification on all Examined Entities
         evaluations: List[CompanyEvaluation] = []
 
-        # Score synthetic profiles
-        for profile in examined_profiles.values():
-            eval_res = evaluate_company_deterministic(
-                profile=profile,
-                criteria=criteria,
-            )
-            evaluations.append(eval_res)
-
         # Score GitHub prospects (group repos by org)
         github_prospects = self._build_github_prospects(
             examined_github_orgs=examined_github_orgs,
@@ -287,8 +266,6 @@ class AgentController:
 
         trace.finalize(reason=run_status)
 
-        is_synthetic = len(examined_profiles) > 0 and len(github_prospects) == 0
-
         return AgentRunResult(
             goal=goal,
             criteria=criteria,
@@ -299,14 +276,13 @@ class AgentController:
             total_tool_calls=trace.total_tool_calls,
             total_tokens=trace.total_prompt_tokens + trace.total_completion_tokens,
             duration_seconds=trace.total_duration_seconds,
-            is_synthetic_demo_run=is_synthetic,
+            is_synthetic_demo_run=False,
         )
 
     def _track_tool_result(
         self,
         tool_name: str,
         tool_result: ToolResult,
-        examined_profiles: Dict[str, CompanyProfile],
         examined_github_repos: Dict[str, GitHubRepoSummary],
         examined_github_orgs: Dict[str, GitHubOrgSummary],
         github_orgs_with_releases: set[str],
@@ -316,11 +292,7 @@ class AgentController:
             return
 
         try:
-            if tool_name == "get_company_profile" and isinstance(tool_result.data, dict):
-                profile = CompanyProfile.model_validate(tool_result.data)
-                examined_profiles[profile.id] = profile
-
-            elif tool_name == "get_repo_details" and isinstance(tool_result.data, dict):
+            if tool_name == "get_repo_details" and isinstance(tool_result.data, dict):
                 repo = GitHubRepoSummary.model_validate(tool_result.data)
                 examined_github_repos[repo.full_name] = repo  # dedup by full_name
 

@@ -1,75 +1,82 @@
 """Tests for tool validation, schema generation, and sandboxed execution."""
 
+from typing import Any, Dict
+from pydantic import BaseModel, Field
 import pytest
-from prospectpilot.dataset import CompanyDataset
-from prospectpilot.tools.base import ToolRegistry, ToolResult
-from prospectpilot.tools.company_tools import register_company_tools
+
+from prospectpilot.tools.base import Tool, ToolRegistry, ToolResult
+
+
+class SampleArgs(BaseModel):
+    query: str = Field(description="Search query string")
+    limit: int = Field(default=10, description="Max results")
 
 
 @pytest.fixture
-def registry(real_demo_dataset: CompanyDataset) -> ToolRegistry:
+def registry() -> ToolRegistry:
     reg = ToolRegistry()
-    register_company_tools(reg, real_demo_dataset)
+
+    def sample_handler(query: str, limit: int = 10) -> Dict[str, Any]:
+        if query == "trigger_error":
+            raise RuntimeError("Underlying service exploded")
+        return {"query": query, "count": limit, "items": ["result1", "result2"]}
+
+    reg.register(
+        Tool(
+            name="sample_tool",
+            description="A sample tool for testing registry functionality.",
+            args_schema=SampleArgs,
+            handler=sample_handler,
+        )
+    )
     return reg
 
 
-def test_search_companies_tool_success(registry: ToolRegistry) -> None:
-    """Verifies that search_companies returns valid data."""
-    res = registry.execute("search_companies", {"query": "eBPF"})
+def test_tool_execution_success(registry: ToolRegistry) -> None:
+    """Verifies that executing a registered tool returns success and data."""
+    res = registry.execute("sample_tool", {"query": "devops", "limit": 5})
     assert res.success is True
-    assert isinstance(res.data, list)
-    assert len(res.data) >= 1
-    assert res.data[0]["id"] == "comp-001"
+    assert res.data == {"query": "devops", "count": 5, "items": ["result1", "result2"]}
     assert res.execution_time_ms >= 0
-
-
-def test_get_company_profile_tool_success(registry: ToolRegistry) -> None:
-    """Verifies that get_company_profile returns the complete profile dict."""
-    res = registry.execute("get_company_profile", {"company_id": "comp-001"})
-    assert res.success is True
-    assert isinstance(res.data, dict)
-    assert res.data["name"] == "TracePulse"
-    assert "tech_stack" in res.data
-    assert "signals" in res.data
+    assert "result1" in res.to_observation_string()
 
 
 def test_tool_argument_validation_failure(registry: ToolRegistry) -> None:
     """Verifies that missing or invalid arguments fail gracefully with Pydantic validation errors."""
-    # Missing required 'company_id'
-    res = registry.execute("get_company_profile", {})
+    # Missing required 'query'
+    res = registry.execute("sample_tool", {})
     assert res.success is False
+    assert res.error is not None
     assert "validation failed" in res.error.lower()
-    assert "company_id" in res.error
+    assert "query" in res.error
+    assert "TOOL ERROR: Argument validation failed" in res.to_observation_string()
 
 
-def test_tool_runtime_error_unknown_company(registry: ToolRegistry) -> None:
-    """Verifies that an unknown company ID returns a structured error message rather than crashing."""
-    res = registry.execute("get_company_profile", {"company_id": "comp-unknown-999"})
+def test_tool_runtime_error_sandboxing(registry: ToolRegistry) -> None:
+    """Verifies that an exception in handler returns a structured error message without crashing."""
+    res = registry.execute("sample_tool", {"query": "trigger_error"})
     assert res.success is False
-    assert "not found in demonstration dataset" in res.error
+    assert res.error is not None
+    assert "Underlying service exploded" in res.error
+    assert "TOOL ERROR: Execution error in 'sample_tool'" in res.to_observation_string()
 
 
 def test_tool_openai_schema_generation(registry: ToolRegistry) -> None:
     """Verifies that registered tools generate valid OpenAI function schemas."""
     schemas = registry.get_openai_tools()
-    assert len(schemas) == 2
+    assert len(schemas) == 1
 
-    tool_names = [s["function"]["name"] for s in schemas]
-    assert "search_companies" in tool_names
-    assert "get_company_profile" in tool_names
-
-    for s in schemas:
-        assert s["type"] == "function"
-        fn = s["function"]
-        assert "name" in fn
-        assert "description" in fn
-        assert "parameters" in fn
-        assert fn["parameters"]["type"] == "object"
+    fn = schemas[0]["function"]
+    assert fn["name"] == "sample_tool"
+    assert "description" in fn
+    assert fn["parameters"]["type"] == "object"
+    assert "query" in fn["parameters"]["properties"]
 
 
 def test_unregistered_tool_call(registry: ToolRegistry) -> None:
     """Calling an unknown tool returns a clean error listing available tools."""
     res = registry.execute("execute_arbitrary_code", {})
     assert res.success is False
+    assert res.error is not None
     assert "is not registered" in res.error
-    assert "search_companies" in res.error
+    assert "sample_tool" in res.error

@@ -54,7 +54,7 @@ class OpenAICompatibleClient:
         if not self.api_key:
             raise ValueError(
                 "No API key provided. Set OPENAI_API_KEY, GROQ_API_KEY, OPENROUTER_API_KEY, "
-                "or GEMINI_API_KEY in your environment, or pass --mock to run offline."
+                "or GEMINI_API_KEY in your environment, or configure OPENAI_BASE_URL."
             )
 
         self.base_url = (
